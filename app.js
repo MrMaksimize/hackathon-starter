@@ -2,7 +2,6 @@
  * Module dependencies.
  */
 
-var _ = require('underscore');
 var express = require('express');
 var cookieParser = require('cookie-parser');
 var compress = require('compression');
@@ -56,17 +55,19 @@ mongoose.connection.on('error', function() {
   console.error('✗ MongoDB Connection Error. Please make sure MongoDB is running.');
 });
 
-/**
- * Express configuration.
- */
-
 var hour = 3600000;
 var day = hour * 24;
 var week = day * 7;
 
-var csrfWhitelist = [
-  '/this-url-will-bypass-csrf'
-];
+/**
+ * CSRF Whitelist
+ */
+
+var whitelist = ['/url1', '/url2'];
+
+/**
+ * Express configuration.
+ */
 
 app.set('port', process.env.PORT || 3000);
 app.set('views', path.join(__dirname, 'views'));
@@ -92,9 +93,8 @@ app.use(session({
 app.use(passport.initialize());
 app.use(passport.session());
 app.use(function(req, res, next) {
-  // Conditional CSRF.
-  if (_.contains(csrfWhitelist, req.path)) return next();
-  csrf(req, res, next);
+  if (whitelist.indexOf(req.path) !== -1) next();
+  else csrf(req, res, next);
 });
 app.use(function(req, res, next) {
   res.locals.user = req.user;
@@ -154,7 +154,6 @@ app.get('/api/venmo', passportConf.isAuthenticated, passportConf.isAuthorized, a
 app.post('/api/venmo', passportConf.isAuthenticated, passportConf.isAuthorized, apiController.postVenmo);
 app.get('/api/linkedin', passportConf.isAuthenticated, passportConf.isAuthorized, apiController.getLinkedin);
 app.get('/api/instagram', passportConf.isAuthenticated, passportConf.isAuthorized, apiController.getInstagram);
-app.post('/api/instagram', passportConf.isAuthenticated, passportConf.isAuthorized, apiController.postInstagram);
 
 /**
  * OAuth routes for sign-in.
@@ -204,7 +203,7 @@ app.get('/auth/venmo/callback', passport.authorize('venmo', { failureRedirect: '
 
 /**
  * 500 Error Handler.
- * As of Express 4.0 it must be placed at the end of all routes.
+ * As of Express 4.0 it must be placed at the end, after all routes.
  */
 
 app.use(errorHandler());
