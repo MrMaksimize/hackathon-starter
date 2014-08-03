@@ -1,4 +1,4 @@
-var _ = require('underscore');
+var _ = require('lodash');
 var async = require('async');
 var crypto = require('crypto');
 var nodemailer = require('nodemailer');
@@ -177,22 +177,21 @@ exports.postUpdatePassword = function(req, res, next) {
 /**
  * POST /account/delete
  * Delete user account.
- * @param id - User ObjectId
  */
 
 exports.postDeleteAccount = function(req, res, next) {
   User.remove({ _id: req.user.id }, function(err) {
     if (err) return next(err);
     req.logout();
+    req.flash('info', { msg: 'Your account has been deleted.' });
     res.redirect('/');
   });
 };
 
 /**
  * GET /account/unlink/:provider
- * Unlink OAuth2 provider from the current user.
+ * Unlink OAuth provider.
  * @param provider
- * @param id - User ObjectId
  */
 
 exports.getOauthUnlink = function(req, res, next) {
@@ -220,7 +219,6 @@ exports.getReset = function(req, res) {
   if (req.isAuthenticated()) {
     return res.redirect('/');
   }
-
   User
     .findOne({ resetPasswordToken: req.params.token })
     .where('resetPasswordExpires').gt(Date.now())
@@ -238,6 +236,7 @@ exports.getReset = function(req, res) {
 /**
  * POST /reset/:token
  * Process the reset password request.
+ * @param token
  */
 
 exports.postReset = function(req, res, next) {
@@ -275,7 +274,7 @@ exports.postReset = function(req, res, next) {
         });
     },
     function(user, done) {
-      var smtpTransport = nodemailer.createTransport('SMTP', {
+      var transporter = nodemailer.createTransport({
         service: 'SendGrid',
         auth: {
           user: secrets.sendgrid.user,
@@ -289,7 +288,7 @@ exports.postReset = function(req, res, next) {
         text: 'Hello,\n\n' +
           'This is a confirmation that the password for your account ' + user.email + ' has just been changed.\n'
       };
-      smtpTransport.sendMail(mailOptions, function(err) {
+      transporter.sendMail(mailOptions, function(err) {
         req.flash('success', { msg: 'Success! Your password has been changed.' });
         done(err);
       });
@@ -353,7 +352,7 @@ exports.postForgot = function(req, res, next) {
       });
     },
     function(token, user, done) {
-      var smtpTransport = nodemailer.createTransport('SMTP', {
+      var transporter = nodemailer.createTransport({
         service: 'SendGrid',
         auth: {
           user: secrets.sendgrid.user,
@@ -369,7 +368,7 @@ exports.postForgot = function(req, res, next) {
           'http://' + req.headers.host + '/reset/' + token + '\n\n' +
           'If you did not request this, please ignore this email and your password will remain unchanged.\n'
       };
-      smtpTransport.sendMail(mailOptions, function(err) {
+      transporter.sendMail(mailOptions, function(err) {
         req.flash('info', { msg: 'An e-mail has been sent to ' + user.email + ' with further instructions.' });
         done(err, 'done');
       });

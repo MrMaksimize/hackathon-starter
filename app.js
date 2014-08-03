@@ -12,6 +12,7 @@ var errorHandler = require('errorhandler');
 var csrf = require('lusca').csrf();
 var methodOverride = require('method-override');
 
+var _ = require('lodash');
 var MongoStore = require('connect-mongo')({ session: session });
 var flash = require('express-flash');
 var path = require('path');
@@ -25,7 +26,7 @@ var dotenv = require('dotenv');
 dotenv.load();
 
 /**
- * Load controllers.
+ * Controllers (route handlers).
  */
 
 var homeController = require('./controllers/home');
@@ -34,7 +35,7 @@ var apiController = require('./controllers/api');
 var contactController = require('./controllers/contact');
 
 /**
- * API keys + Passport configuration.
+ * API keys and Passport configuration.
  */
 
 var secrets = require('./config/secrets');
@@ -47,12 +48,12 @@ var passportConf = require('./config/passport');
 var app = express();
 
 /**
- * Mongoose configuration.
+ * Connect to MongoDB.
  */
 
 mongoose.connect(secrets.db);
 mongoose.connection.on('error', function() {
-  console.error('✗ MongoDB Connection Error. Please make sure MongoDB is running.');
+  console.error('MongoDB Connection Error. Make sure MongoDB is running.');
 });
 
 var hour = 3600000;
@@ -60,10 +61,10 @@ var day = hour * 24;
 var week = day * 7;
 
 /**
- * CSRF Whitelist
+ * CSRF whitelist.
  */
 
-var whitelist = ['/url1', '/url2'];
+var csrfExclude = ['/url1', '/url2'];
 
 /**
  * Express configuration.
@@ -72,18 +73,20 @@ var whitelist = ['/url1', '/url2'];
 app.set('port', process.env.PORT || 3000);
 app.set('views', path.join(__dirname, 'views'));
 app.set('view engine', 'jade');
+app.use(compress());
 app.use(connectAssets({
-  paths: ['public/css', 'public/js'],
+  paths: [path.join(__dirname, 'public/css'), path.join(__dirname, 'public/js')],
   helperContext: app.locals
 }));
-app.use(compress());
 app.use(logger('dev'));
 app.use(bodyParser.json());
-app.use(bodyParser.urlencoded());
+app.use(bodyParser.urlencoded({ extended: true }));
 app.use(expressValidator());
 app.use(methodOverride());
 app.use(cookieParser());
 app.use(session({
+  resave: true,
+  saveUninitialized: true,
   secret: secrets.sessionSecret,
   store: new MongoStore({
     url: secrets.db,
@@ -92,28 +95,30 @@ app.use(session({
 }));
 app.use(passport.initialize());
 app.use(passport.session());
+app.use(flash());
 app.use(function(req, res, next) {
-  if (whitelist.indexOf(req.path) !== -1) next();
-  else csrf(req, res, next);
+  // CSRF protection.
+  if (_.contains(csrfExclude, req.path)) return next();
+  csrf(req, res, next);
 });
 app.use(function(req, res, next) {
+  // Make user object available in templates.
   res.locals.user = req.user;
   next();
 });
-app.use(flash());
-app.use(express.static(path.join(__dirname, 'public'), { maxAge: week }));
 app.use(function(req, res, next) {
-  // Keep track of previous URL to redirect back to
-  // original destination after a successful login.
-  if (req.method !== 'GET') return next();
+  // Remember original destination before login.
   var path = req.path.split('/')[1];
-  if (/(auth|login|logout|signup)$/i.test(path)) return next();
+  if (/auth|login|logout|signup|fonts|favicon/i.test(path)) {
+    return next();
+  }
   req.session.returnTo = req.path;
   next();
 });
+app.use(express.static(path.join(__dirname, 'public'), { maxAge: week }));
 
 /**
- * Application routes.
+ * Main routes.
  */
 
 app.get('/', homeController.index);
@@ -133,6 +138,11 @@ app.post('/account/profile', passportConf.isAuthenticated, userController.postUp
 app.post('/account/password', passportConf.isAuthenticated, userController.postUpdatePassword);
 app.post('/account/delete', passportConf.isAuthenticated, userController.postDeleteAccount);
 app.get('/account/unlink/:provider', passportConf.isAuthenticated, userController.getOauthUnlink);
+
+/**
+ * API examples routes.
+ */
+
 app.get('/api', apiController.getApi);
 app.get('/api/lastfm', apiController.getLastfm);
 app.get('/api/nyt', apiController.getNewYorkTimes);
@@ -150,13 +160,15 @@ app.get('/api/tumblr', passportConf.isAuthenticated, passportConf.isAuthorized, 
 app.get('/api/facebook', passportConf.isAuthenticated, passportConf.isAuthorized, apiController.getFacebook);
 app.get('/api/github', passportConf.isAuthenticated, passportConf.isAuthorized, apiController.getGithub);
 app.get('/api/twitter', passportConf.isAuthenticated, passportConf.isAuthorized, apiController.getTwitter);
+app.post('/api/twitter', passportConf.isAuthenticated, passportConf.isAuthorized, apiController.postTwitter);
 app.get('/api/venmo', passportConf.isAuthenticated, passportConf.isAuthorized, apiController.getVenmo);
 app.post('/api/venmo', passportConf.isAuthenticated, passportConf.isAuthorized, apiController.postVenmo);
 app.get('/api/linkedin', passportConf.isAuthenticated, passportConf.isAuthorized, apiController.getLinkedin);
 app.get('/api/instagram', passportConf.isAuthenticated, passportConf.isAuthorized, apiController.getInstagram);
+app.get('/api/yahoo', apiController.getYahoo);
 
 /**
- * OAuth routes for sign-in.
+ * OAuth sign-in routes.
  */
 
 app.get('/auth/instagram', passport.authenticate('instagram'));
@@ -185,7 +197,7 @@ app.get('/auth/linkedin/callback', passport.authenticate('linkedin', { failureRe
 });
 
 /**
- * OAuth routes for API examples that require authorization.
+ * OAuth authorization routes for API examples.
  */
 
 app.get('/auth/foursquare', passport.authorize('foursquare'));
@@ -203,7 +215,6 @@ app.get('/auth/venmo/callback', passport.authorize('venmo', { failureRedirect: '
 
 /**
  * 500 Error Handler.
- * As of Express 4.0 it must be placed at the end, after all routes.
  */
 
 app.use(errorHandler());
@@ -213,7 +224,7 @@ app.use(errorHandler());
  */
 
 app.listen(app.get('port'), function() {
-  console.log("✔ Express server listening on port %d in %s mode", app.get('port'), app.get('env'));
+  console.log('Express server listening on port %d in %s mode', app.get('port'), app.get('env'));
 });
 
 module.exports = app;
